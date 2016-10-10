@@ -1,6 +1,5 @@
 // AFJSONSerializationTests.m
-//
-// Copyright (c) 2013-2015 AFNetworking (http://afnetworking.com)
+// Copyright (c) 2011–2016 Alamofire Software Foundation ( http://alamofire.org/ )
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +25,7 @@
 #import "AFURLResponseSerialization.h"
 
 static NSData * AFJSONTestData() {
-    return [NSJSONSerialization dataWithJSONObject:@{@"foo": @"bar"} options:0 error:nil];
+    return [NSJSONSerialization dataWithJSONObject:@{@"foo": @"bar"} options:(NSJSONWritingOptions)0 error:nil];
 }
 
 #pragma mark -
@@ -65,6 +64,17 @@ static NSData * AFJSONTestData() {
     NSString *body = [[NSString alloc] initWithData:[request HTTPBody] encoding:NSUTF8StringEncoding];
 
     XCTAssertTrue([@"[{\"key\":\"value\"}]" isEqualToString:body], @"Parameters were not encoded correctly");
+}
+
+- (void)testThatJSONRequestSerializationHandlesInvalidParameters {
+    NSString *string = [[NSString alloc] initWithBytes:"\xd8\x00" length:2 encoding:NSUTF16StringEncoding];
+    
+    NSDictionary *parameters = @{@"key":string};
+    NSError *error = nil;
+    NSMutableURLRequest *request = [self.requestSerializer requestWithMethod:@"POST" URLString:AFNetworkingTestsBaseURLString parameters:parameters error:&error];
+    
+    XCTAssertNil(request, @"Expected nil request.");
+    XCTAssertNotNil(error, @"Expected non-nil error.");
 }
 
 @end
@@ -132,6 +142,55 @@ static NSData * AFJSONTestData() {
     [self.responseSerializer responseObjectForResponse:response data:[@"{invalid}" dataUsingEncoding:NSUTF8StringEncoding] error:&error];
 
     XCTAssertNotNil(error, @"Serialization error should not be nil");
+}
+
+- (void)testThatJSONResponseSerializerReturnsNilObjectAndNilErrorForEmptyData {
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.baseURL statusCode:200 HTTPVersion:@"1.1" headerFields:@{@"Content-Type":@"text/json"}];
+    NSData *data = [NSData data];
+    NSError *error = nil;
+    id responseObject = [self.responseSerializer responseObjectForResponse:response data:data error:&error];
+    XCTAssertNil(responseObject);
+    XCTAssertNil(error);
+}
+
+- (void)testThatJSONResponseSerializerReturnsNilObjectAndNilErrorForSingleSpace {
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.baseURL statusCode:200 HTTPVersion:@"1.1" headerFields:@{@"Content-Type":@"text/json"}];
+    NSData *data = [@" " dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error = nil;
+    id responseObject = [self.responseSerializer responseObjectForResponse:response data:data error:&error];
+    XCTAssertNil(responseObject);
+    XCTAssertNil(error);
+}
+
+- (void)testThatJSONRemovesKeysWithNullValues {
+    self.responseSerializer.removesKeysWithNullValues = YES;
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.baseURL statusCode:200 HTTPVersion:@"1.1" headerFields:@{@"Content-Type":@"text/json"}];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"key":@"value",@"nullkey":[NSNull null],@"array":@[@{@"subnullkey":[NSNull null]}]}
+                                                   options:(NSJSONWritingOptions)0
+                                                     error:nil];
+
+    NSError *error = nil;
+    NSDictionary *responseObject = [self.responseSerializer responseObjectForResponse:response
+                                                                                 data:data
+                                                                                error:&error];
+    XCTAssertNil(error);
+    XCTAssertNotNil(responseObject[@"key"]);
+    XCTAssertNil(responseObject[@"nullkey"]);
+    XCTAssertNil(responseObject[@"array"][0][@"subnullkey"]);
+}
+
+- (void)testThatJSONResponseSerializerCanBeCopied {
+    [self.responseSerializer setAcceptableStatusCodes:[NSIndexSet indexSetWithIndex:100]];
+    [self.responseSerializer setAcceptableContentTypes:[NSSet setWithObject:@"test/type"]];
+    [self.responseSerializer setReadingOptions:NSJSONReadingMutableLeaves];
+    [self.responseSerializer setRemovesKeysWithNullValues:YES];
+
+    AFJSONResponseSerializer *copiedSerializer = [self.responseSerializer copy];
+    XCTAssertNotEqual(copiedSerializer, self.responseSerializer);
+    XCTAssertEqual(copiedSerializer.acceptableStatusCodes, self.responseSerializer.acceptableStatusCodes);
+    XCTAssertEqual(copiedSerializer.acceptableContentTypes, self.responseSerializer.acceptableContentTypes);
+    XCTAssertEqual(copiedSerializer.readingOptions, self.responseSerializer.readingOptions);
+    XCTAssertEqual(copiedSerializer.removesKeysWithNullValues, self.responseSerializer.removesKeysWithNullValues);
 }
 
 @end
